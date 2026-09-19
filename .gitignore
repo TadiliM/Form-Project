@@ -1,0 +1,28 @@
+# Build artifacts .NET
+bin/
+obj/
+
+# Fichiers de configuration sensibles (clés API, connexions DB)
+appsettings.Development.json
+appsettings.Production.json
+*/appsettings.json
+*.env
+.env
+
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+*.user
+*.suo
+.idea/
+# Fichiers de migration temporaires (optionnel, débattu — voir note plus bas)
+# Migrations/ ne doit PAS être ignoré, voir explication
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Fichiers Docker locaux si tu as un docker-compose.override.yml
+docker-compose.override.yml
