@@ -23,6 +23,7 @@ public class Form
         Fields.RemoveAll(f => f.Id == fieldId);
     }
 
+    /// <summary>A form is valid only when it contains at least one field.</summary>
     public bool Validate()
     {
         return Fields.Count > 0;

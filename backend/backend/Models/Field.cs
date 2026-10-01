@@ -13,5 +13,6 @@ public abstract class Field
     public bool IsRequired { get; set; }
     public int Order { get; set; }
 
+    /// <summary>Validates the raw submitted value against this concrete field type's own rules.</summary>
     public abstract bool Validate(string value);
 }

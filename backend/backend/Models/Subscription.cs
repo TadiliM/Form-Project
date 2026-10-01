@@ -14,12 +14,14 @@ public class Subscription
     public DateTime CurrentPeriodEnd {get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+    /// <summary>Marks the subscription as active and syncs the owner's plan to Pro.</summary>
     public void Activate()
     {
         Status = SubscriptionStatus.Active;
         User?.SetPlanType(PlanType.Pro);
     }
 
+    /// <summary>Marks the subscription as cancelled and syncs the owner's plan back to Free.</summary>
     public void Cancel()
     {
         Status = SubscriptionStatus.Cancelled;

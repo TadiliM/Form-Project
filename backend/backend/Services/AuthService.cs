@@ -27,7 +27,7 @@ public class AuthService : IAuthService
             .AnyAsync(u => u.Email == request.Email);
 
         if (emailExists)
-            throw new InvalidOperationException("Cet email est déjà utilisé.");
+            throw new InvalidOperationException("This email is already in use.");
 
         var user = new User
         {
@@ -49,7 +49,7 @@ public class AuthService : IAuthService
             .FirstOrDefaultAsync(u => u.Email == request.Email);
 
         if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
-            throw new UnauthorizedAccessException("Email ou mot de passe incorrect.");
+            throw new UnauthorizedAccessException("Incorrect email or password.");
 
         return BuildAuthResponse(user);
     }

@@ -4,6 +4,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using backend.Data;
 using backend.Services;
+using Stripe;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,10 +13,16 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(connectionString));
 
-// Enregistrement du service d'authentification
-builder.Services.AddScoped<IAuthService, AuthService>();
+// Stripe API key
+StripeConfiguration.ApiKey = builder.Configuration["Stripe:SecretKey"];
 
-// Configuration JWT
+// Register business services (one instance per HTTP request: "scoped")
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<ISubscriptionsService,SubscriptionsService>();
+builder.Services.AddScoped<IFormService, FormService>();
+builder.Services.AddScoped<IUserService, UserService>();
+
+// JWT configuration
 var jwtKey = builder.Configuration["Jwt:Key"]!;
 builder.Services.AddAuthentication(options =>
 {
@@ -40,8 +47,8 @@ builder.Services.AddControllers();
 
 var app = builder.Build();
 
-app.UseAuthentication();  // vérifie le JWT sur chaque requête
-app.UseAuthorization();   // vérifie les droits d'accès
+app.UseAuthentication();  // validates the JWT on every request
+app.UseAuthorization();   // checks access rights
 
 app.MapControllers();
 
