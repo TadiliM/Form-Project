@@ -143,10 +143,3 @@ running.
 The plan is read from the database on every call, so a subscription change takes
 effect immediately — the `planType` claim inside a JWT is only a snapshot from
 login time.
-
-## Documentation
-
-- `frontendTasks.md` — what remains to build the frontend (design, API integration, deployment)
-- `MVP.md` — MVP scope and success criteria
-- `TestsBackend.md` — how the test suite works and what it covers
-- `NextStep.md`, `CorrectionPaiement.md`, `Afaire.md` — working notes
