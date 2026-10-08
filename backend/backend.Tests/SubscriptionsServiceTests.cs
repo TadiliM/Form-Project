@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using backend.Models.Enums;
 using backend.Services;
 using Microsoft.EntityFrameworkCore;
@@ -306,6 +308,136 @@ public class SubscriptionsServiceTests : ServiceTestBase
 
         var subscription = await ReadAsync(db => db.Subscriptions.SingleAsync(s => s.UserId == user.Id));
         Assert.Equal(SubscriptionStatus.Active, subscription.Status);
+    }
+
+    [Fact]
+    public async Task CancelSubscription_WhenStripeAccepts_CancelsLocallyWithoutWaitingForTheWebhook()
+    {
+        // The customer.subscription.deleted webhook cannot reach a local API, so the call
+        // itself has to update the local state: otherwise the plan stays Pro after
+        // cancelling, even after signing out and back in.
+        var user = await SeedUserAsync(PlanType.Pro);
+        await SeedSubscriptionAsync(user.Id, stripeSubscriptionId: "sub_test_123");
+
+        using var stripe = new StripeApiStub(request =>
+            request.Method == HttpMethod.Delete
+                ? StripeJson(SubscriptionJson("sub_test_123", "canceled"))
+                : StripeJson(SubscriptionJson("sub_test_123", "active")));
+
+        await CreateService().CancelSubscriptionAsync(user.Id);
+
+        Assert.Contains("DELETE", stripe.Handler.Methods);
+
+        var subscription = await ReadAsync(db => db.Subscriptions.SingleAsync(s => s.UserId == user.Id));
+        Assert.Equal(SubscriptionStatus.Cancelled, subscription.Status);
+        Assert.Equal(
+            PlanType.Free,
+            await ReadAsync(db => db.Users.Where(u => u.Id == user.Id).Select(u => u.PlanType).SingleAsync()));
+    }
+
+    [Fact]
+    public async Task CancelSubscription_CalledTwice_StopsAtTheLocalStateWithoutHittingStripeAgain()
+    {
+        // The second click used to reach Stripe with an already-cancelled subscription and
+        // answer "Error while cancelling"; it must now stop at the local state.
+        var user = await SeedUserAsync(PlanType.Pro);
+        await SeedSubscriptionAsync(user.Id, stripeSubscriptionId: "sub_test_123");
+
+        using var stripe = new StripeApiStub(request =>
+            request.Method == HttpMethod.Delete
+                ? StripeJson(SubscriptionJson("sub_test_123", "canceled"))
+                : StripeJson(SubscriptionJson("sub_test_123", "active")));
+
+        var service = CreateService();
+        await service.CancelSubscriptionAsync(user.Id);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.CancelSubscriptionAsync(user.Id));
+
+        Assert.Equal("No active subscription to cancel.", exception.Message);
+        Assert.Equal(1, stripe.Handler.Methods.Count(method => method == "DELETE"));
+    }
+
+    [Fact]
+    public async Task CancelSubscription_AlreadyCancelledAtStripe_MovesTheUserBackToFreeAnyway()
+    {
+        // The stuck state this fixes: Stripe cancelled the subscription, the local row was
+        // left Active (a lost webhook), so the plan stayed Pro and cancelling again failed.
+        var user = await SeedUserAsync(PlanType.Pro);
+        await SeedSubscriptionAsync(user.Id, stripeSubscriptionId: "sub_test_123");
+
+        // Stripe's real answer to a second cancellation: an error, which used to surface as
+        // "Error while cancelling" and leave the account on Pro.
+        using var stripe = new StripeApiStub(request =>
+            request.Method == HttpMethod.Delete
+                ? StripeError(HttpStatusCode.BadRequest, "This subscription has been canceled and cannot be canceled again.")
+                : StripeJson(SubscriptionJson("sub_test_123", "canceled")));
+
+        await CreateService().CancelSubscriptionAsync(user.Id);
+
+        // No point asking Stripe to cancel twice: the DELETE is skipped.
+        Assert.DoesNotContain("DELETE", stripe.Handler.Methods);
+
+        var subscription = await ReadAsync(db => db.Subscriptions.SingleAsync(s => s.UserId == user.Id));
+        Assert.Equal(SubscriptionStatus.Cancelled, subscription.Status);
+        Assert.Equal(
+            PlanType.Free,
+            await ReadAsync(db => db.Users.Where(u => u.Id == user.Id).Select(u => u.PlanType).SingleAsync()));
+    }
+
+    // Stripe HTTP stubbing (the SDK builds and parses the requests for real; only the network
+    // is replaced). Tests of this collection run one at a time, so swapping the SDK's global
+    // client is safe as long as the previous one is restored.
+
+    private static HttpResponseMessage StripeJson(string body) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(body, Encoding.UTF8, "application/json")
+    };
+
+    private static HttpResponseMessage StripeError(HttpStatusCode status, string message) => new(status)
+    {
+        Content = new StringContent(
+            $$"""{ "error": { "type": "invalid_request_error", "message": "{{message}}" } }""",
+            Encoding.UTF8,
+            "application/json")
+    };
+
+    private static string SubscriptionJson(string id, string status) =>
+        $$"""{ "id": "{{id}}", "object": "subscription", "status": "{{status}}" }""";
+
+    private sealed class StripeApiStub : IDisposable
+    {
+        private readonly IStripeClient _previous;
+
+        public StripeApiStub(Func<HttpRequestMessage, HttpResponseMessage> responder)
+        {
+            Handler = new StubStripeHandler(responder);
+            _previous = StripeConfiguration.StripeClient;
+            StripeConfiguration.StripeClient = new StripeClient(
+                "sk_test_stub",
+                httpClient: new SystemNetHttpClient(new HttpClient(Handler)));
+        }
+
+        public StubStripeHandler Handler { get; }
+
+        public void Dispose() => StripeConfiguration.StripeClient = _previous;
+    }
+
+    private sealed class StubStripeHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, HttpResponseMessage> _responder;
+
+        public StubStripeHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) =>
+            _responder = responder;
+
+        public List<string> Methods { get; } = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Methods.Add(request.Method.Method);
+            return Task.FromResult(_responder(request));
+        }
     }
 
     // Event payloads (same shapes as the ones Stripe sends)

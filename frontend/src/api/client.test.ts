@@ -132,10 +132,10 @@ describe('api client', () => {
     await expect(deleteForm('f1')).resolves.toBeUndefined();
   });
 
-  it('resolves with undefined on a 202 with an empty body', async () => {
-    // POST /api/subscriptions/cancel answers 202 Accepted with no body.
+  it('resolves with undefined on a 200 with an empty body', async () => {
+    // POST /api/subscriptions/cancel answers 200 OK with no body.
     setToken('abc123');
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 202 })));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 200 })));
 
     await expect(cancelSubscription()).resolves.toBeUndefined();
   });

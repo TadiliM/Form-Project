@@ -85,8 +85,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     throw new ApiError(response.status, message);
   }
 
-  // 204 (DELETE) and 202 (async cancellation) come back with an empty body, and
-  // response.json() would throw "Unexpected end of JSON input" on them. Read the
+  // 204 (DELETE) and the cancellation/confirmation calls come back with an empty body,
+  // and response.json() would throw "Unexpected end of JSON input" on them. Read the
   // raw text and only parse it when there is something to parse.
   const text = await response.text();
   if (text === '') return undefined as T;

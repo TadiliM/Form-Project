@@ -86,7 +86,7 @@ public class SubscriptionsController : ControllerBase
         try
         {
             await _subscriptionsService.CancelSubscriptionAsync(userId);
-            return Accepted();
+            return Ok();
         }
         catch (InvalidOperationException ex)
         {

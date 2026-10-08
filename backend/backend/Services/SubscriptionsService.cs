@@ -150,7 +150,20 @@ public class SubscriptionsService : ISubscriptionsService
             throw new InvalidOperationException("Stripe subscription not found.");
 
         var service = new Stripe.SubscriptionService();
-        await service.CancelAsync(subscription.StripeSubscriptionId);
+
+        // A subscription Stripe has already cancelled must not fail here: Stripe refuses to
+        // cancel it again, and that refusal used to show "Error while cancelling" while the
+        // account stayed stuck on Pro forever. Reading the Stripe state first makes the call
+        // idempotent and catches the local record up when Stripe is already done.
+        var stripeSubscription = await service.GetAsync(subscription.StripeSubscriptionId);
+        if (stripeSubscription.Status != "canceled")
+            await service.CancelAsync(subscription.StripeSubscriptionId);
+
+        // Mirror the cancellation locally right away: the customer.subscription.deleted
+        // webhook cannot reach a local API, so waiting for it would leave the user on Pro.
+        // Idempotent with the webhook, which skips an already Cancelled subscription.
+        subscription.Cancel();
+        await _context.SaveChangesAsync();
     }
 
     /// <summary>

@@ -62,7 +62,7 @@ export default function LandingPage() {
         </div>
         <div className="card">
           <h2>Pro</h2>
-          <p className="price">€9 / month</p>
+          <p className="price">€5 / month</p>
           <ul>
             <li>Unlimited forms</li>
             <li>Unlimited responses</li>
