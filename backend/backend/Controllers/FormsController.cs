@@ -8,8 +8,7 @@ namespace backend.Controllers;
 
 [ApiController]
 [Route("api/forms")]
-[Authorize]   // the whole controller requires a JWT; [AllowAnonymous] actions opt out
-public class FormsController : ControllerBase
+[Authorize]  public class FormsController : ControllerBase
 {
     private readonly IFormService _formService;
 
@@ -18,10 +17,6 @@ public class FormsController : ControllerBase
         _formService = formService;
     }
 
-    /// <summary>
-    /// Id of the signed-in user, read from the JWT "sub" claim
-    /// (the JWT middleware renames it to ClaimTypes.NameIdentifier).
-    /// </summary>
     private Guid CurrentUserId => Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
     // Creator endpoints (JWT required)

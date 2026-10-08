@@ -8,6 +8,17 @@ namespace backend.Services;
 
 public class SubscriptionsService : ISubscriptionsService
 {
+    /// <summary>
+    /// Where Stripe sends the user back after a successful payment. The
+    /// "{CHECKOUT_SESSION_ID}" placeholder is filled in by Stripe: the page reads it and the
+    /// API uses it to confirm the payment (see ConfirmCheckoutSessionAsync).
+    /// </summary>
+    public const string DefaultSuccessUrl =
+        "http://localhost:3000/success?session_id={CHECKOUT_SESSION_ID}";
+
+    /// <summary>Where Stripe sends the user back when the payment is abandoned.</summary>
+    public const string DefaultCancelUrl = "http://localhost:3000/cancel";
+
     private readonly AppDbContext _context;
     private readonly IConfiguration _configuration;
 
@@ -23,27 +34,37 @@ public class SubscriptionsService : ISubscriptionsService
         if (user is null)
             throw new InvalidOperationException("User not found.");
 
-        var options = new SessionCreateOptions
-        {
-            Mode = "subscription",
-            LineItems = new List<SessionLineItemOptions>
-            {
-                new SessionLineItemOptions
-                {
-                    Price = _configuration["Stripe:PriceId"],
-                    Quantity = 1
-                }
-            },
-            ClientReferenceId = userId.ToString(),
-            SuccessUrl = "http://localhost:3000/success",
-            CancelUrl = "http://localhost:3000/cancel"
-        };
+        var options = BuildCheckoutOptions(userId);
 
         var service = new SessionService();
         Session session = await service.CreateAsync(options);
 
         return session.Url;
     }
+
+    /// <summary>
+    /// Builds the Stripe Checkout options. Kept separate from the API call so the return
+    /// URLs and the price can be asserted in tests without contacting Stripe.
+    ///
+    /// The URLs are configuration-driven ("Stripe:SuccessUrl" / "Stripe:CancelUrl") because
+    /// the frontend lives on a different origin in production: hardcoded localhost URLs would
+    /// send paying users to a dead page.
+    /// </summary>
+    public SessionCreateOptions BuildCheckoutOptions(Guid userId) => new()
+    {
+        Mode = "subscription",
+        LineItems = new List<SessionLineItemOptions>
+        {
+            new SessionLineItemOptions
+            {
+                Price = _configuration["Stripe:PriceId"],
+                Quantity = 1
+            }
+        },
+        ClientReferenceId = userId.ToString(),
+        SuccessUrl = _configuration["Stripe:SuccessUrl"] ?? DefaultSuccessUrl,
+        CancelUrl = _configuration["Stripe:CancelUrl"] ?? DefaultCancelUrl
+    };
 
     public async Task HandleWebhookAsync(string json, string stripeSignature)
     {
@@ -55,7 +76,8 @@ public class SubscriptionsService : ISubscriptionsService
         switch (stripeEvent.Type)
         {
             case "checkout.session.completed":
-                await HandleCheckoutCompletedAsync(stripeEvent);
+                if (stripeEvent.Data.Object is Session checkoutSession)
+                    await ActivateSubscriptionAsync(checkoutSession);
                 break;
 
             case "customer.subscription.deleted":
@@ -66,6 +88,51 @@ public class SubscriptionsService : ISubscriptionsService
                 await HandleInvoicePaidAsync(stripeEvent);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Reconciles a payment when the buyer comes back from Stripe: reads the Checkout Session
+    /// from the Stripe API and applies it, exactly like the webhook would.
+    ///
+    /// The success page cannot rely on the webhook alone: Stripe has to reach the API over the
+    /// public internet, which never works on localhost, so a local buyer would stay on the Free
+    /// plan forever after paying. Confirming on return makes the upgrade immediate (and keeps
+    /// working in production when a webhook is delayed). Idempotent: the second call is a no-op.
+    /// </summary>
+    public async Task ConfirmCheckoutSessionAsync(Guid userId, string sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+            throw new InvalidOperationException("Missing checkout session id.");
+
+        Session session;
+        try
+        {
+            session = await new SessionService().GetAsync(sessionId);
+        }
+        catch (StripeException ex)
+        {
+            throw new InvalidOperationException("This checkout session is unknown to Stripe.", ex);
+        }
+
+        EnsureSessionBelongsToUser(session, userId);
+
+        if (session.PaymentStatus is not ("paid" or "no_payment_required"))
+            throw new InvalidOperationException("This checkout session has not been paid yet.");
+
+        await ActivateSubscriptionAsync(session);
+    }
+
+    /// <summary>
+    /// Refuses a session that belongs to somebody else: the session id travels in the URL, so
+    /// without this check anyone signed in could activate another buyer's subscription.
+    /// </summary>
+    public static void EnsureSessionBelongsToUser(Session session, Guid userId)
+    {
+        if (!Guid.TryParse(session.ClientReferenceId, out var owner))
+            throw new InvalidOperationException("This checkout session is not linked to a user.");
+
+        if (owner != userId)
+            throw new InvalidOperationException("This checkout session belongs to another user.");
     }
 
     public async Task CancelSubscriptionAsync(Guid userId)
@@ -86,10 +153,16 @@ public class SubscriptionsService : ISubscriptionsService
         await service.CancelAsync(subscription.StripeSubscriptionId);
     }
 
-    private async Task HandleCheckoutCompletedAsync(Event stripeEvent)
+    /// <summary>
+    /// Creates the local subscription and moves its owner to Pro. Shared by the webhook and by
+    /// the return-from-Stripe confirmation, so both paths behave identically.
+    /// </summary>
+    public async Task ActivateSubscriptionAsync(Session session)
     {
-        var session = stripeEvent.Data.Object as Session;
-        if (session is null) return;
+        // A session with no subscription (one-off payment, or a checkout that was never
+        // completed) has nothing to store: activating it would grant a Pro plan for free.
+        if (string.IsNullOrEmpty(session.SubscriptionId))
+            return;
 
         if (!Guid.TryParse(session.ClientReferenceId, out var userId))
             return;

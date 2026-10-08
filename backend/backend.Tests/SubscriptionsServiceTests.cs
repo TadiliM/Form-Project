@@ -1,7 +1,9 @@
 using backend.Models.Enums;
 using backend.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Stripe;
+using Stripe.Checkout;
 
 namespace backend.Tests;
 
@@ -28,6 +30,47 @@ public class SubscriptionsServiceTests : ServiceTestBase
             () => CreateService().CreateCheckoutSessionAsync(Guid.NewGuid()));
 
         Assert.Equal("User not found.", exception.Message);
+    }
+
+    // Return URLs: configuration-driven, so a deployment does not send buyers to localhost.
+
+    [Fact]
+    public void BuildCheckoutOptions_WithoutConfiguredUrls_FallsBackToLocalhost()
+    {
+        var options = CreateService().BuildCheckoutOptions(Guid.NewGuid());
+
+        Assert.Equal(SubscriptionsService.DefaultSuccessUrl, options.SuccessUrl);
+        Assert.Equal(SubscriptionsService.DefaultCancelUrl, options.CancelUrl);
+    }
+
+    [Fact]
+    public void BuildCheckoutOptions_WithConfiguredUrls_UsesThem()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Stripe:PriceId"] = "price_test_123",
+                ["Stripe:SuccessUrl"] = "https://app.example.com/success",
+                ["Stripe:CancelUrl"] = "https://app.example.com/cancel"
+            })
+            .Build();
+
+        var options = new SubscriptionsService(Context, configuration).BuildCheckoutOptions(Guid.NewGuid());
+
+        Assert.Equal("https://app.example.com/success", options.SuccessUrl);
+        Assert.Equal("https://app.example.com/cancel", options.CancelUrl);
+    }
+
+    [Fact]
+    public void BuildCheckoutOptions_CarriesThePriceAndTheUserReference()
+    {
+        var userId = Guid.NewGuid();
+
+        var options = CreateService().BuildCheckoutOptions(userId);
+
+        Assert.Equal("subscription", options.Mode);
+        Assert.Equal("price_test_123", Assert.Single(options.LineItems).Price);
+        Assert.Equal(userId.ToString(), options.ClientReferenceId);
     }
 
     // Stripe webhooks
@@ -133,6 +176,97 @@ public class SubscriptionsServiceTests : ServiceTestBase
         Assert.Empty(await ReadAsync(db => db.Subscriptions.ToListAsync()));
         Assert.Equal(
             PlanType.Free,
+            await ReadAsync(db => db.Users.Where(u => u.Id == user.Id).Select(u => u.PlanType).SingleAsync()));
+    }
+
+    // Confirming the payment when the buyer comes back from Stripe
+
+    [Fact]
+    public void DefaultSuccessUrl_CarriesTheCheckoutSessionPlaceholder()
+    {
+        // The success page needs the session id to confirm the payment itself; without the
+        // placeholder Stripe would redirect to a page that has nothing to verify.
+        Assert.Contains("{CHECKOUT_SESSION_ID}", SubscriptionsService.DefaultSuccessUrl);
+    }
+
+    [Fact]
+    public async Task ConfirmCheckoutSession_WithoutASessionId_ThrowsAnExplicitException()
+    {
+        var user = await SeedUserAsync();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => CreateService().ConfirmCheckoutSessionAsync(user.Id, "   "));
+
+        Assert.Equal("Missing checkout session id.", exception.Message);
+    }
+
+    [Fact]
+    public void EnsureSessionBelongsToUser_WithTheBuyer_DoesNotThrow()
+    {
+        var userId = Guid.NewGuid();
+
+        SubscriptionsService.EnsureSessionBelongsToUser(
+            new Session { ClientReferenceId = userId.ToString() }, userId);
+    }
+
+    [Fact]
+    public void EnsureSessionBelongsToUser_WithAnotherUsersSession_Throws()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            SubscriptionsService.EnsureSessionBelongsToUser(
+                new Session { ClientReferenceId = Guid.NewGuid().ToString() }, Guid.NewGuid()));
+
+        Assert.Equal("This checkout session belongs to another user.", exception.Message);
+    }
+
+    [Fact]
+    public void EnsureSessionBelongsToUser_WithoutAReference_Throws()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            SubscriptionsService.EnsureSessionBelongsToUser(new Session(), Guid.NewGuid()));
+
+        Assert.Equal("This checkout session is not linked to a user.", exception.Message);
+    }
+
+    [Fact]
+    public async Task ActivateSubscription_WithASessionWithoutSubscription_IsIgnored()
+    {
+        // A checkout that never became a subscription (one-off payment, abandoned session)
+        // must not hand out a Pro plan: that is how a Free account used to flip to Pro with
+        // an empty StripeSubscriptionId in the database.
+        var user = await SeedUserAsync(PlanType.Free);
+
+        await CreateService().ActivateSubscriptionAsync(new Session
+        {
+            ClientReferenceId = user.Id.ToString(),
+            SubscriptionId = string.Empty
+        });
+
+        Assert.Empty(await ReadAsync(db => db.Subscriptions.ToListAsync()));
+        Assert.Equal(
+            PlanType.Free,
+            await ReadAsync(db => db.Users.Where(u => u.Id == user.Id).Select(u => u.PlanType).SingleAsync()));
+    }
+
+    [Fact]
+    public async Task ActivateSubscription_WithASubscriptionSession_UpgradesTheUserToPro()
+    {
+        // The exact path the confirm endpoint uses: the plan flips with no webhook involved.
+        var user = await SeedUserAsync(PlanType.Free);
+
+        await CreateService().ActivateSubscriptionAsync(new Session
+        {
+            ClientReferenceId = user.Id.ToString(),
+            SubscriptionId = "sub_test_confirm",
+            CustomerId = "cus_test_confirm"
+        });
+
+        var subscription = await ReadAsync(db => db.Subscriptions.SingleAsync(s => s.UserId == user.Id));
+        Assert.Equal("sub_test_confirm", subscription.StripeSubscriptionId);
+        Assert.Equal("cus_test_confirm", subscription.StripeCustomerId);
+        Assert.Equal(SubscriptionStatus.Active, subscription.Status);
+        Assert.Equal(
+            PlanType.Pro,
             await ReadAsync(db => db.Users.Where(u => u.Id == user.Id).Select(u => u.PlanType).SingleAsync()));
     }
 

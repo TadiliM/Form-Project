@@ -2,7 +2,11 @@
 bin/
 obj/
 
-# Fichiers de configuration sensibles (clés API, connexions DB)
+# Frontend (Vite + React)
+node_modules/
+dist/
+
+# Confidential informations
 appsettings.Development.json
 appsettings.Production.json
 */appsettings.json
@@ -15,8 +19,6 @@ appsettings.Production.json
 *.user
 *.suo
 .idea/
-# Fichiers de migration temporaires (optionnel, débattu — voir note plus bas)
-# Migrations/ ne doit PAS être ignoré, voir explication
 
 # macOS
 .DS_Store

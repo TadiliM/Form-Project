@@ -29,6 +29,28 @@ public class SubscriptionsController : ControllerBase
         return Ok(new CreateCheckoutSessionResponseDto { CheckoutUrl = checkoutUrl });
     }
 
+    /// <summary>
+    /// Called by the success page with the Checkout Session id Stripe put in the URL. The service
+    /// re-reads the session from Stripe and activates the plan.
+    /// </summary>
+    [Authorize]
+    [HttpPost("confirm")]
+    public async Task<IActionResult> ConfirmCheckoutSession(
+        [FromBody] ConfirmCheckoutSessionRequestDto request)
+    {
+        var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        try
+        {
+            await _subscriptionsService.ConfirmCheckoutSessionAsync(userId, request.SessionId);
+            return Ok();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("webhook")]
     public async Task<IActionResult> HandleStripeWebhook()
     {

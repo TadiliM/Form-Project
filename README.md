@@ -58,6 +58,10 @@ ownership checks, plan limits, slug generation) live in the services and models.
 | GET | `/api/forms/public/{slug}` | — | Public form definition |
 | POST | `/api/forms/public/{slug}/responses` | — | Submits a response |
 | GET | `/api/users/me` | JWT | Current profile (up-to-date plan) |
+| POST | `/api/subscriptions/checkout` | JWT | Creates a Stripe Checkout session |
+| POST | `/api/subscriptions/confirm` | JWT | Re-checks a paid session and activates the plan |
+| POST | `/api/subscriptions/cancel` | JWT | Cancels at the end of the period |
+| GET | `/health` | — | Liveness probe (Docker healthcheck, uptime monitor) |
 | PUT | `/api/users/me` | JWT | Updates the display name |
 | POST | `/api/subscriptions/checkout` | JWT | Creates a Stripe Checkout session |
 | POST | `/api/subscriptions/cancel` | JWT | Cancels the active subscription |
@@ -110,9 +114,8 @@ operation, `401` bad credentials, `409` email already in use.
 ### Run the stack
 
 ```bash
-docker compose up -d --build
-\`\`\`
-dotnet ef database update --project backend/backend
+docker compose up -d --build                                        # API + PostgreSQL
+dotnet ef database update --project backend/backend                 # apply the migrations
 ```
 
 The API is then available at `http://localhost:5050` and PostgreSQL at
@@ -130,8 +133,15 @@ dotnet test backend/backend.Tests/backend.Tests.csproj
 ```
 
 The suite uses Testcontainers: it starts a throwaway `postgres:16` container, gives
-every test its own database, and covers the services (64 tests). Docker must be
+every test its own database, and covers the services (74 tests). Docker must be
 running.
+
+The frontend has its own tests:
+
+```bash
+cd frontend
+npm test          # 48 unit tests (Vitest + jsdom)
+```
 
 ## Plans and limits
 
@@ -146,7 +156,6 @@ login time.
 
 ## Documentation
 
-- `frontendTasks.md` — what remains to build the frontend (design, API integration, deployment)
-- `MVP.md` — MVP scope and success criteria
-- `TestsBackend.md` — how the test suite works and what it covers
-- `NextStep.md`, `CorrectionPaiement.md`, `Afaire.md` — working notes
+- `Frontend.md` — the React app: HTTP client, JWT session, the Stripe return flow, the tests
+- `Deploy.md` — putting the project online on a single small VM (Caddy + Docker Compose)
+- `frontendTasks.md` — the frontend roadmap (design, pages, deployment)
