@@ -48,7 +48,16 @@ jobs:
           script: |
             set -e
             cd /opt/form-project
+            
             git fetch origin main
             git reset --hard origin/main
+
+            # Rebuild du frontend
+            cd frontend
+            npm ci
+            npm run build
+            cd ..
+
+
             docker compose -f docker-compose.prod.yml up -d --build
             docker image prune -f
