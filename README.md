@@ -153,9 +153,3 @@ npm test          # 48 unit tests (Vitest + jsdom)
 The plan is read from the database on every call, so a subscription change takes
 effect immediately — the `planType` claim inside a JWT is only a snapshot from
 login time.
-
-## Documentation
-
-- `Frontend.md` — the React app: HTTP client, JWT session, the Stripe return flow, the tests
-- `Deploy.md` — putting the project online on a single small VM (Caddy + Docker Compose)
-- `frontendTasks.md` — the frontend roadmap (design, pages, deployment)
