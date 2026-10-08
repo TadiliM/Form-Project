@@ -1,5 +1,9 @@
 # Form-Project
 
+[![CI](https://github.com/TadiliM/Form-Project/actions/workflows/ci.yaml/badge.svg)](https://github.com/TadiliM/Form-Project/actions/workflows/ci.yaml)
+
+🔗 **Online Demo** : [formproject.mtadili.dev](https://formproject.mtadili.dev)
+
 A form builder with custom fields and a paid Pro subscription. Users create forms,
 share them through a public link, collect responses, and upgrade from the Free plan
 through Stripe Checkout.
@@ -58,14 +62,12 @@ ownership checks, plan limits, slug generation) live in the services and models.
 | GET | `/api/forms/public/{slug}` | — | Public form definition |
 | POST | `/api/forms/public/{slug}/responses` | — | Submits a response |
 | GET | `/api/users/me` | JWT | Current profile (up-to-date plan) |
-| POST | `/api/subscriptions/checkout` | JWT | Creates a Stripe Checkout session |
 | POST | `/api/subscriptions/confirm` | JWT | Re-checks a paid session and activates the plan |
-| POST | `/api/subscriptions/cancel` | JWT | Cancels at the end of the period |
-| GET | `/health` | — | Liveness probe (Docker healthcheck, uptime monitor) |
-| PUT | `/api/users/me` | JWT | Updates the display name |
 | POST | `/api/subscriptions/checkout` | JWT | Creates a Stripe Checkout session |
 | POST | `/api/subscriptions/cancel` | JWT | Cancels the active subscription |
 | POST | `/api/subscriptions/webhook` | Stripe signature | Receives Stripe events |
+| PUT | `/api/users/me` | JWT | Updates the display name |
+| GET | `/health` | — | Liveness probe (Docker healthcheck, uptime monitor) |
 
 Errors are returned as `{ "message": "..." }`: `404` not found, `400` invalid
 operation, `401` bad credentials, `409` email already in use.
@@ -133,7 +135,7 @@ dotnet test backend/backend.Tests/backend.Tests.csproj
 ```
 
 The suite uses Testcontainers: it starts a throwaway `postgres:16` container, gives
-every test its own database, and covers the services (74 tests). Docker must be
+every test its own database, and covers the services (77 tests). Docker must be
 running.
 
 The frontend has its own tests:

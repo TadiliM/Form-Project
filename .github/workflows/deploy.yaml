@@ -1,0 +1,27 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    needs: [backend, frontend] 
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /opt/form-project
+            
+            git fetch origin main
+            git reset --hard origin/main
+            
+            docker compose -f docker-compose.prod.yml up -d --build
+            
+            docker image prune -f
